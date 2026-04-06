@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pro-Bending 3D Tech Demo</title>
+    <style>
+    body { margin: 0; overflow: hidden; background: #111; font-family: 'Courier New', Courier, monospace; user-select: none;}
+    #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; width: calc(100% - 20px); }
+    #crosshair { position: absolute; top: 60%; left: 50%; width: 10px; height: 10px; 
+                 border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
+    
+    /* HUD Elements */
+    .hud-bar-container { width: 300px; height: 20px; background: rgba(0,0,0,0.5); border: 2px solid #555; margin-bottom: 5px; position: relative;}
+    .hud-bar-fill { height: 100%; transition: width 0.1s linear; }
+    
+    /* Container for the bars to live in */
+    .bar-wrapper {
+    width: 300px;           /* Consistent width for both bars */
+    height: 25px;           
+    background: #222;       /* Darker background shows "empty" space better */
+    margin: 10px;           
+    border: 2px solid #111;
+    position: relative;
+    overflow: hidden;
+    border-radius: 6px;     /* Rounds the corners for a modern feel */
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3); /* Subtle depth shadow */
+}
+
+    /* Common style for the filling parts - THE GLOSSY LAYER */
+    #player-health, #player-stamina {
+    height: 100%;
+    transition: width 0.3s ease; 
+    
+    /* THE SHINE: This creates a 3D cylindrical look on top of the color */
+    background-image: linear-gradient(
+        to bottom, 
+        rgba(255, 255, 255, 0.35) 0%, 
+        rgba(255, 255, 255, 0) 50%, 
+        rgba(0, 0, 0, 0.25) 100%
+    );
+}
+
+    /* Specific colors - THE BASE LAYER */
+    #player-health { 
+    background-color: #2ecc71; /* Emerald Green */
+}
+
+    #player-stamina { 
+    background-color: #aaa;    /* Default grey, changed by your JS */
+}
+
+    /* Labels to put inside the bars */
+    .bar-text {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    letter-spacing: 1px;       /* Makes the text feel more "UI-like" */
+    text-shadow: 1px 1px 3px #000; /* Heavy shadow for max readability */
+    pointer-events: none;
+    z-index: 10;               /* Ensures text stays on top of the shine */
+    margin: 0;
+}
+    
+    .label { position: absolute; left: 5px; top: 0px; font-weight: bold; font-size: 14px; text-transform: uppercase; color: white; mix-blend-mode: difference;}
+
+    #zone-indicator { position: absolute; top: 10px; right: 10px; font-size: 24px; font-weight: bold; color: #f1c40f; text-align: right;}
+</style>
+</head>
+<body>
+
+<div id="crosshair"></div>
+<div id="ui"></div>
+
+<div id="countdown" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: sans-serif; font-size: 120px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.5); pointer-events: none;"></div>
+
+<div class="bar-wrapper">
+    <div id="player-health"></div>
+    <div class="bar-text">HEALTH</div>
+</div>
+
+<div class="bar-wrapper">
+    <div id="player-stamina"></div>
+    <div class="bar-text">STAMINA</div>
+</div>
+
+<div id="zone-indicator">ZONE 1</div>
+
+<div id="element-selection-overlay" style="
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+    background: rgba(0,0,0,0.9); display: flex; flex-direction: column; 
+    align-items: center; justify-content: center; 
+    z-index: 1000000; /* One million - nothing can be higher */
+    font-family: sans-serif;">
+    
+    <h1 style="color: white; margin-bottom: 20px;">CHOOSE YOUR ELEMENT</h1>
+    <div style="display: flex; gap: 20px;">
+        <button onclick="console.log('Button clicked!'); startGame('FIRE')" style="pointer-events: auto; position: relative; z-index: 1000001; padding: 20px 40px; background: #ff4400; color: white; border: none; cursor: pointer; border-radius: 8px; font-weight: bold;">FIRE</button>
+        <button onclick="console.log('Button clicked!'); startGame('WATER')" style="pointer-events: auto; position: relative; z-index: 1000001; padding: 20px 40px; background: #0088ff; color: white; border: none; cursor: pointer; border-radius: 8px; font-weight: bold;">WATER</button>
+        <button onclick="console.log('Button clicked!'); startGame('EARTH')" style="pointer-events: auto; position: relative; z-index: 1000001; padding: 20px 40px; background: #22ff44; color: black; border: none; cursor: pointer; border-radius: 8px; font-weight: bold;">EARTH</button>
+    </div>
+</div>
+
+<script>
+    function startGame(element) {
+        if (window.runStartLogic) {
+            window.runStartLogic(element);
+        } else {
+            console.log("Game still loading, please wait a second...");
+        }
+		// Set the stamina bar color to match the element!
+        const stamBar = document.getElementById('player-stamina');
+        if (element === 'FIRE') stamBar.style.background = '#ff4400';
+        if (element === 'WATER') stamBar.style.background = '#0088ff';
+        if (element === 'EARTH') stamBar.style.background = '#22ff44';
+    }
+</script>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+	
+	
+	
+/*const ELEMENTS = {
+    // kb (knockback) reduced significantly
+    EARTH: { color: 0x2ecc71, speed: 0.5, dmg: 25, kb: 0.5, size: 0.7, cooldown: 1250, heat: 0 },
+    WATER: { color: 0x3498db, speed: 1.5, dmg: 10, kb: 0.10, size: 0.2, cooldown: 500, heat: 0 },
+    FIRE:  { color: 0xff4400, speed: 1.0, dmg: 15,  kb: 0.25, size: 0.45, cooldown: 750, heat: 6 }
+};*/
+
+const ELEMENTS = {
+    // Earth: 2 shots and you're out (50 drain x 2 = 100)
+    EARTH: { 
+	color: 0x2ecc71,
+	projectileColor: 0x8B4513,
+	speed: 0.5, dmg: 25,
+	kb: 0.5, size: 0.7,
+	cooldown: 1250,
+	drain: 50,
+	recovery: 0.5 },
+	
+    // Water: 10 shots before exhaustion (10 drain x 10 = 100)
+    WATER: {
+	color: 0x3498db,
+	projectileColor: 0x3498db,
+	speed: 1.5, dmg: 10,
+	kb: 0.10, size: 0.2,
+	cooldown: 500,
+	drain: 10,
+	recovery: 1.2 },
+	
+    // Fire: ~4-5 shots (22 drain)
+    FIRE:  {
+	color: 0xff8800,
+	projectileColor: 0xff8800,
+	speed: 1.0,
+	dmg: 15,
+	kb: 0.25,
+	size: 0.45,
+	cooldown: 750,
+	drain: 22,
+	recovery: 0.8 }
+};
+
+
+
+
+	
+let torches = [];
+let bannerPivots = []; 
+let dustParticles = [];
+let zoomLevel = 1.0;
+let windDirectionZ = 1;
+let gameActive = false; // The game starts paused
+let entities = [];
+let projectiles = [];
+let particles = [];
+window.player = null; // Forces it into the global 'window' space
+let blueTeam = [];
+let orangeTeam = [];
+let isFollowMode = true; // Start in Over the Shoulder mode
+let isSpectator = false;
+let spectatorZOffset = 0;
+let isMouseDown = false;
+
+
+
+
+    window.runStartLogic = function(selectedElement) {
+    const player = blueTeam.find(f => f.isPlayer);
+    const oldElement = player.currentElement;
+
+    // Helper function to paint all body parts (Head, Torso, Arms, Legs)
+    const paintFighter = (fighter, colorHex) => {
+        fighter.mesh.traverse((part) => {
+            if (part.isMesh && part.material) {
+                part.material.color.setHex(colorHex);
+            }
+        });
+    };
+
+    // 1. Find the teammate who currently has the element the player wants
+    const teammate = blueTeam.find(bot => !bot.isPlayer && bot.currentElement === selectedElement);
+
+    if (teammate) {
+        // Swap teammate to player's current element
+        teammate.currentElement = oldElement;
+        paintFighter(teammate, ELEMENTS[oldElement].color);
+    }
+
+    // 2. Give player the new selection
+    player.currentElement = selectedElement;
+    paintFighter(player, ELEMENTS[selectedElement].color);
+
+    // 3. UI Updates
+    const config = ELEMENTS[selectedElement];
+    const cssColor = '#' + new THREE.Color(config.color).getHexString();
+    
+    if (document.getElementById('crosshair')) {
+        document.getElementById('crosshair').style.borderColor = cssColor;
+    }
+
+    const overlay = document.getElementById('element-selection-overlay');
+    if (overlay) overlay.style.display = 'none';
+    
+    startCountdown();
+};
+
+
+
+
+// --- CONFIG ---
+const SETTINGS = {
+    GRAVITY: -0.02,
+    
+    // 22 * 1.15 = 25.3 (15% wider)
+    ARENA_WIDTH: 25.3, 
+    
+    // 46 * 1.10 = 50.6 (10% longer)
+    ARENA_LENGTH: 50.6, 
+    
+    DRAG: 0.85, 
+
+    // --- UPDATED ZONES (Names added, Z-ranges scaled to 50.6 total) ---
+    ZONES: [
+        { name: 'Inner',  color: 0x2ecc71, z: 8.4 },  // Green (Closest to center)
+        { name: 'Middle', color: 0xf1c40f, z: 16.8 }, // Yellow
+        { name: 'Outer',  color: 0xe74c3c, z: 25.3 }  // Red (Back of the arena)
+    ],
+
+    // --- AI BOUNDARY ---
+    // This tells the bots exactly where the side walls are (Width / 2 - buffer)
+    WALL_X: (25.3 / 2) - 1.5 
+};
+
+
+
+
+// --- SCENE SETUP ---
+const scene = new THREE.Scene();
+
+// 1. SKY & FOG: Changed from dark night to bright sunny sky
+const skyColor = 0x87CEEB; // Bright Sky Blue
+scene.background = new THREE.Color(skyColor);
+// Fog matches the sky so the desert floor fades into the horizon
+//If the arena feels too "foggy" while you're playing, increase the first number (the 40). If the edge of the desert floor looks too sharp or "cutoff" in the distance, decrease the second number (the 350).
+scene.fog = new THREE.Fog(skyColor, 40, 350); 
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 4.0, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- LIGHTS: Updated for Cinematic Desert Shadows ---
+// 1. Warm ambient bounce from the sand
+const ambientLight = new THREE.AmbientLight(0xfff5e1, 0.6); 
+scene.add(ambientLight);
+
+// 2. Sky light (helps the "blue" in the sky affect the scene)
+const skyLight = new THREE.HemisphereLight(0xffffff, 0xd2b48c, 0.4); 
+scene.add(skyLight);
+
+// 3. The Sun (Lowered for longer, more dramatic shadows)
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.5); 
+sunLight.position.set(80, 60, 100); 
+sunLight.castShadow = true;
+
+// 4. SHADOW CALIBRATION (Essential for large arenas)
+const d = 150; // Increased range to cover the whole stadium
+sunLight.shadow.camera.left = -d;
+sunLight.shadow.camera.right = d;
+sunLight.shadow.camera.top = d;
+sunLight.shadow.camera.bottom = -d;
+
+// Higher resolution for those tattered banner edges
+sunLight.shadow.mapSize.width = 2048; 
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.far = 500;
+
+sunLight.shadow.bias = -0.0001; // Prevents "leaks" in humanoid shadows
+
+scene.add(sunLight);
+
+// Removed waterLight/stadiumLight to clean up the "Natural" sun look
+
+// --- THE DESERT FLOOR ---
+const desertGeo = new THREE.CircleGeometry(800, 32); // Massive circle
+const desertMat = new THREE.MeshStandardMaterial({ 
+    color: 0xedc9af, // Sand color
+    roughness: 1,
+    metalness: 0 
+});
+const desert = new THREE.Mesh(desertGeo, desertMat);
+desert.rotation.x = -Math.PI / 2;
+desert.position.y = -0.05; // Just barely below the arena floor
+desert.receiveShadow = true;
+scene.add(desert);
+
+// Dune loop with shadows
+for (let i = 0; i < 15; i++) {
+    const duneGeo = new THREE.SphereGeometry(30 + Math.random() * 40, 32, 12);
+    const dune = new THREE.Mesh(duneGeo, desertMat);
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 180 + Math.random() * 200; // Pushed further out
+    dune.position.set(Math.cos(angle) * dist, -20, Math.sin(angle) * dist);
+    dune.scale.y = 0.3; 
+    
+    dune.castShadow = true;    // Dunes cast shadows on the floor
+    dune.receiveShadow = true; // Floor casts shadows on dunes
+    scene.add(dune);
+}
+
+
+
+
+function createArena() {
+    const stadium = new THREE.Group();
+    const arenaGroup = new THREE.Group();
+    
+    // 1. THE BATTLE RING BASE
+    const base = new THREE.Mesh(
+        new THREE.BoxGeometry(SETTINGS.ARENA_WIDTH, 1, SETTINGS.ARENA_LENGTH),
+        new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 })
+    );
+    base.position.y = -0.5; 
+    arenaGroup.add(base);
+
+    const centerLine = new THREE.Mesh(
+        new THREE.PlaneGeometry(SETTINGS.ARENA_WIDTH, 0.4),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+    );
+    centerLine.rotation.x = -Math.PI / 2;
+    centerLine.position.y = 0.02;
+    arenaGroup.add(centerLine);
+
+    // --- COLOR STRIPS ---
+    const blueShades = [0x5dade2, 0x3498db, 0x21618c];
+    const orangeShades = [0xf39c12, 0xe67e22, 0xa04000];
+
+    SETTINGS.ZONES.forEach((zone, index) => {
+        const prevZ = index === 0 ? 0 : SETTINGS.ZONES[index - 1].z;
+        const stripDepth = zone.z - prevZ;
+        const zCenter = (zone.z + prevZ) / 2;
+        [-1, 1].forEach(side => {
+            const teamColor = side === 1 ? blueShades[index] : orangeShades[index];
+            const stripGeo = new THREE.PlaneGeometry(SETTINGS.ARENA_WIDTH, stripDepth);
+            const stripMat = new THREE.MeshStandardMaterial({ 
+                color: teamColor, transparent: true, opacity: 0.6, 
+                emissive: teamColor, emissiveIntensity: 0.2 
+            });
+            const strip = new THREE.Mesh(stripGeo, stripMat);
+            strip.rotation.x = -Math.PI / 2;
+            strip.position.set(0, 0.01, zCenter * side);
+            arenaGroup.add(strip);
+        });
+    });
+
+    // 2. THE STADIUM STRUCTURE
+    const platform = new THREE.Mesh(
+        new THREE.BoxGeometry(SETTINGS.ARENA_WIDTH + 4, 10, SETTINGS.ARENA_LENGTH + 4),
+        new THREE.MeshStandardMaterial({ color: 0x222222 })
+    );
+    platform.position.y = -5.5;
+    stadium.add(platform);
+
+    const water = new THREE.Mesh(
+        new THREE.PlaneGeometry(500, 500),
+        new THREE.MeshStandardMaterial({ color: 0x0044ff, roughness: 0.1, metalness: 0.5 })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = -15; 
+    stadium.add(water);
+
+    // --- 3. STADIUM SEATING ---
+    const distanceAway = 12;
+    const stadiumColor = 0x333333; 
+    const stepHeight = 1.2;
+    const stepDepth = 1.8;
+    const numSteps = 5;
+
+    // Internal function to build the bowl
+    function buildBowl() {
+        const group = new THREE.Group();
+        const arenaHWidth = (SETTINGS.ARENA_WIDTH / 2) + distanceAway;
+        const arenaHLength = (SETTINGS.ARENA_LENGTH / 2) + distanceAway;
+
+        for (let i = 0; i < numSteps; i++) {
+            const offset = i * stepDepth;
+            const h = i * stepHeight;
+            const outerW = arenaHWidth + offset + stepDepth;
+            const outerL = arenaHLength + offset + stepDepth;
+            const innerW = arenaHWidth + offset;
+            const innerL = arenaHLength + offset;
+
+            const ringShape = new THREE.Shape();
+            ringShape.moveTo(-outerW, -outerL);
+            ringShape.lineTo(outerW, -outerL);
+            ringShape.lineTo(outerW, outerL);
+            ringShape.lineTo(-outerW, outerL);
+            ringShape.lineTo(-outerW, -outerL);
+
+            const holePath = new THREE.Path();
+            holePath.moveTo(-innerW, -innerL);
+            holePath.lineTo(-innerW, innerL);
+            holePath.lineTo(innerW, innerL);
+            holePath.lineTo(innerW, -innerL);
+            holePath.lineTo(-innerW, -innerL);
+            ringShape.holes.push(holePath);
+
+            const stepGeo = new THREE.ExtrudeGeometry(ringShape, { depth: stepHeight, bevelEnabled: false });
+            const stepMesh = new THREE.Mesh(stepGeo, new THREE.MeshStandardMaterial({ color: stadiumColor }));
+            stepMesh.rotation.x = Math.PI / 2;
+            stepMesh.position.y = h;
+            group.add(stepMesh);
+        }
+        return group;
+    }
+    stadium.add(buildBowl());
+
+    // --- 4. THE CROWD (Skip Top Row) ---
+    const crowdGroup = new THREE.Group();
+    const colorBlue = 0x0077ff;   
+    const colorOrange = 0xff8800; 
+
+    for (let i = 0; i < numSteps - 1; i++) { //numSteps-1 leaves the top row empty
+        const tierW = (SETTINGS.ARENA_WIDTH / 2) + distanceAway + (i * stepDepth) + (stepDepth / 2);
+        const tierL = (SETTINGS.ARENA_LENGTH / 2) + distanceAway + (i * stepDepth) + (stepDepth / 2);
+        const tierY = i * stepHeight + 0.05; 
+		
+	const buffer = 1.5;
+
+        const rows = [
+            // Long Sides (Blue/Orange) - We "shorten" these by the buffer
+            { start: -tierW + buffer, end: tierW - buffer, pos: tierL,  side: 'blue' },
+            { start: -tierW + buffer, end: tierW - buffer, pos: -tierL, side: 'orange' },
+            // Short Ends (Mixed) - These keep their full length to "wrap" the corners
+            { start: -tierL, end: tierL, pos: tierW,  side: 'mixed' },
+            { start: -tierL, end: tierL, pos: -tierW, side: 'mixed' }
+        ];
+
+        rows.forEach(row => {
+            const length = row.end - row.start;
+            for (let d = 0; d < length; d += 1.4) {
+                if (Math.random() < 0.6) {
+                    const h = 0.8 * (0.8 + Math.random() * 0.4);
+                    const fan = new THREE.Mesh(
+                        new THREE.CapsuleGeometry(0.35, h, 2, 6),
+                        new THREE.MeshStandardMaterial({ color: row.side === 'blue' ? (Math.random() < 0.9 ? colorBlue : colorOrange) : (row.side === 'orange' ? (Math.random() < 0.9 ? colorOrange : colorBlue) : (Math.random() > 0.5 ? colorBlue : colorOrange)) })
+                    );
+                    const yPos = tierY + (h / 2) + 0.35;
+                    if (row.side === 'blue' || row.side === 'orange') fan.position.set(row.start + d, yPos, row.pos);
+                    else fan.position.set(row.pos, yPos, row.start + d);
+					
+		fan.position.x += (Math.random() - 0.5) * 0.2;
+		fan.position.z += (Math.random() - 0.5) * 0.2;
+		fan.rotation.y = Math.random() * Math.PI * 2; // Fans face different ways	
+		
+                    crowdGroup.add(fan);
+                }
+            }
+        });
+    }
+    stadium.add(crowdGroup);
+
+function getBannerGroup(color, index = 0) {
+    const group = new THREE.Group();
+    const bannerWidth = 4.2;
+    const bannerHeight = 8;
+    const poleHeight = 12;
+    const offset = 0.3;
+    const segments = 8;
+
+    // --- 1. VERTICAL POLE ---
+    const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.25, poleHeight),
+        new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.2, roughness: 0.9 })
+    );
+    pole.position.y = poleHeight / 2; 
+    pole.castShadow = true;   // <--- Casts a long shadow
+    pole.receiveShadow = true;
+    group.add(pole);
+
+    // --- 2. GOLD CROSSBAR ---
+    const trim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.1, bannerWidth + 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x886600, metalness: 0.5, roughness: 0.7 })
+    );
+    trim.rotation.z = Math.PI / 2;
+    trim.position.set((bannerWidth / 2) + offset, poleHeight - 0.8, 0.3);
+    trim.castShadow = true;
+    group.add(trim);
+
+    // --- 3. THE ROPES (Tying Crossbar to Pole) ---
+    const ropeMat = new THREE.MeshStandardMaterial({ color: 0x554433, roughness: 1.0 });
+    
+    // Create two "wraps" of rope around the joint
+    for (let i = 0; i < 2; i++) {
+        const rope = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.26, 0.26, 0.15, 8),
+            ropeMat
+        );
+        // Positioned right at the junction of the pole and the crossbar
+        rope.position.set(0, poleHeight - 0.8 + (i * 0.2 - 0.1), 0.15);
+        rope.rotation.x = Math.PI / 2; // Wrap around the intersection
+		rope.castShadow = true;    // The rope casts a shadow
+        rope.receiveShadow = true; // The rope can receive shadows from the pole
+        group.add(rope);
+    }
+
+    // --- 4. THE FABRIC (Unbreakable Plane) ---
+    const geo = new THREE.PlaneGeometry(bannerWidth, bannerHeight, segments, 1);
+    const pos = geo.attributes.position;
+    const seed = (index + 1) * 2.5;
+
+    for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        const x = pos.getX(i);
+        if (y < 0) {
+            const jaggedLift = Math.abs(Math.sin(x * 2 + seed)) * 1.5 + (Math.random() * 0.3);
+            pos.setY(i, y + jaggedLift);
+        }
+    }
+    pos.needsUpdate = true;
+
+    const sandColor = new THREE.Color(0xc2b280); 
+    const bleachedColor = new THREE.Color(color).lerp(sandColor, 0.3);
+    const fabricMat = new THREE.MeshStandardMaterial({ 
+        color: bleachedColor, 
+        side: THREE.DoubleSide, 
+        roughness: 1.0,
+        metalness: 0.0,
+        transparent: false 
+    });
+
+    const fabric = new THREE.Mesh(geo, fabricMat);
+    fabric.position.set(bannerWidth / 2 + offset, -bannerHeight / 2, 0); 
+    fabric.castShadow = true; // <--- The banner itself casts a shadow
+    fabric.receiveShadow = true;
+
+    // --- 5. THE PIVOT ---
+    const pivot = new THREE.Group();
+    pivot.position.set(0, poleHeight - 0.8, 0.3);
+    pivot.add(fabric);
+    group.add(pivot);
+    
+    if (typeof bannerPivots !== 'undefined') bannerPivots.push(pivot);
+
+    return group;
+}
+
+    // --- 6. BANNER PLACEMENT ---
+    const topTierIndex = numSteps - 1;
+    const bHeight = topTierIndex * stepHeight;
+    const bDepth = (SETTINGS.ARENA_LENGTH / 2) + distanceAway + (topTierIndex * stepDepth) + (stepDepth / 2);
+
+    for(let i = -1; i <= 1; i++) {
+        const xPos = i * 10;
+        // Blue
+        const bBanner = getBannerGroup(colorBlue);
+        bBanner.position.set(xPos, bHeight, bDepth);
+        stadium.add(bBanner);
+        // Orange
+        const oBanner = getBannerGroup(colorOrange);
+        oBanner.position.set(xPos, bHeight, -bDepth);
+        oBanner.rotation.y = Math.PI;
+        stadium.add(oBanner);
+    }
+
+    // --- 7. FINAL ASSEMBLY ---
+    stadium.add(arenaGroup);
+    scene.add(stadium);
+}
+
+// Call it once
+createArena();
+
+
+
+
+// --- SYSTEMS ---
+function spawnVFX(pos, color, count, power = 0.3) {
+    for(let i=0; i<count; i++) {
+        const p = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.1, 0.1),
+            new THREE.MeshBasicMaterial({ 
+                color: color, 
+                transparent: true,
+                // Removed AdditiveBlending so Earth looks like solid dirt, not light
+                opacity: 0.8
+            })
+        );
+        p.position.copy(pos);
+        
+        const vel = new THREE.Vector3(
+            (Math.random() - 0.5) * power,
+            (Math.random() - 0.2) * power, 
+            (Math.random() - 0.5) * power
+        );
+        
+        particles.push({ mesh: p, vel: vel, life: 1.0 });
+        scene.add(p);
+    }
+}
+
+function spawnMuzzleFlash(pos, color, count = 10) {
+    for(let i=0; i<count; i++) {
+        const p = new THREE.Mesh(
+            new THREE.BoxGeometry(0.15, 0.15, 0.15),
+            new THREE.MeshStandardMaterial({ 
+                color: color, 
+                emissive: color,      // Makes the particle glow
+                emissiveIntensity: 2, // High intensity for that "spark" look
+                transparent: true, 
+                opacity: 1.0 
+            })
+        );
+        p.position.copy(pos);
+        
+        // Random velocity for the "burst" effect
+        const pwr = 0.15; // Slightly increased power for better "pop"
+        const vel = new THREE.Vector3(
+            (Math.random()-0.5)*pwr, 
+            Math.random()*pwr, 
+            (Math.random()-0.5)*pwr
+        );
+        
+        particles.push({ 
+            mesh: p, 
+            vel: vel, 
+            life: 1.0, 
+            decay: 0.07 
+        });
+        
+        scene.add(p);
+    }
+}
+
+
+
+class Fighter {
+//createplayer, the actual player
+constructor(isPlayer, startZ, color, element) {
+    this.isPlayer = isPlayer;
+    this.team = startZ > 0 ? "BLUE" : "ORANGE"; 
+    this.health = 25;
+    this.currentElement = element;
+    this.stamina = 100;
+    this.isExhausted = false;
+    this.lastShotTime = 0;
+    this.lastInputTime = 0;
+	
+	if (this.isPlayer) {
+    window.player = this; 
+    console.log("Player has been successfully created!");
+}
+
+
+    // --- 1. DYNAMIC RUBBERBANDING ---
+    // We use SETTINGS.ZONES to find where the fighter is starting
+    const absZ = Math.abs(startZ);
+    
+    if (absZ > SETTINGS.ZONES[1].z) {
+        this.currentZoneIndex = 2; // Outer/Back Zone
+    } else if (absZ > SETTINGS.ZONES[0].z) {
+        this.currentZoneIndex = 1; // Middle Zone
+    } else {
+        this.currentZoneIndex = 0; // Inner/Front Zone
+    }
+
+
+        // --- 2. FIX COLORS ---
+    const finalColor = ELEMENTS[element] ? ELEMENTS[element].color : color;
+    const mat = new THREE.MeshStandardMaterial({ 
+    color: finalColor, 
+    roughness: 0.7 
+});
+
+    // Create a Group to hold all body parts
+    this.mesh = new THREE.Group();
+
+    // 1. TORSO (Center it properly)
+	const torsoGeo = new THREE.CapsuleGeometry(0.35, 0.8, 4, 8);
+		this.torso = new THREE.Mesh(torsoGeo, mat);
+		this.torso.position.y = 1.5; // Lifted so feet touch 0
+		this.torso.castShadow = true;
+		this.mesh.add(this.torso); // Add to MESH, not torso
+
+	// 2. HEAD (Position relative to the Group/Mesh)
+	const headGeo = new THREE.SphereGeometry(0.3, 16, 16);
+		this.head = new THREE.Mesh(headGeo, mat);
+		this.head.position.y = 2.3; // Higher up
+		this.mesh.add(this.head); // Add to MESH
+
+	// 3. ARMS
+	const armGeo = new THREE.CapsuleGeometry(0.12, 0.6, 4, 8);
+		this.leftArm = new THREE.Mesh(armGeo, mat);
+		this.leftArm.position.set(-0.55, 1.7, 0); // Y adjusted for Mesh
+		this.mesh.add(this.leftArm);
+
+		this.rightArm = new THREE.Mesh(armGeo, mat);
+		this.rightArm.position.set(0.55, 1.7, 0);
+		this.mesh.add(this.rightArm);
+
+	// 4. LEGS
+	const legGeo = new THREE.CapsuleGeometry(0.15, 0.7, 4, 8);
+		this.leftLeg = new THREE.Mesh(legGeo, mat);
+		this.leftLeg.position.set(-0.22, 0.5, 0); // Y adjusted so feet hit 0
+		this.mesh.add(this.leftLeg);
+
+		this.rightLeg = new THREE.Mesh(legGeo, mat);
+		this.rightLeg.position.set(0.22, 0.5, 0);
+		this.mesh.add(this.rightLeg);
+
+	// --- 3. FINAL SETUP ---
+	// Move the entire group to the starting position
+	// We use y=0 because the body parts are offset relative to the torso
+	this.mesh.position.set(0, 0, startZ); 
+	this.vel = new THREE.Vector3();
+
+	scene.add(this.mesh);
+        entities.push(this);
+        if (this.isPlayer) window.player = this;
+    }
+
+    update(opponents) {
+        // --- 1. PRE-GAME FREEZE ---
+        if (!gameActive) {
+            this.vel.x = 0;
+            this.vel.z = 0;
+            return; 
+        }
+
+        // --- 3. GRAVITY (Updated for Ground Level 0) ---
+if (this.mesh.position.y > 0) {
+    this.vel.y += SETTINGS.GRAVITY * 2;
+} else {
+    this.vel.y = 0;
+    this.mesh.position.y = 0; // Snap to the actual sand surface
+}
+this.mesh.position.y += this.vel.y;
+
+        // --- 4. PHYSICS & MOVEMENT ---
+        this.mesh.position.x += this.vel.x;
+        this.mesh.position.z += this.vel.z;
+        this.vel.multiplyScalar(SETTINGS.DRAG);
+
+        entities.forEach(other => {
+            if (other === this || !other.mesh.visible) return;
+            const dist = this.mesh.position.distanceTo(other.mesh.position);
+            if (dist < 1.0) {
+                const push = new THREE.Vector3().subVectors(this.mesh.position, other.mesh.position).normalize();
+                this.vel.add(push.multiplyScalar(0.02));
+            }
+        });
+
+        // --- 5. HUMAN-LIKE AI BEHAVIOR ---
+        if (!this.isPlayer && this.mesh.visible) {
+            // A. Projectile Dodging
+            projectiles.forEach(p => {
+                if (p.owner.team !== this.team) {
+                    const distToProj = this.mesh.position.distanceTo(p.mesh.position);
+                    if (distToProj < 5 && Math.random() < 0.7) {
+                        const dodgeDir = new THREE.Vector3().subVectors(this.mesh.position, p.mesh.position);
+                        dodgeDir.y = 0;
+                        this.vel.add(dodgeDir.normalize().multiplyScalar(0.04));
+                    }
+                }
+            });
+
+            // B. Intent-Based Movement
+            if (!this.aiDecisionTime || Date.now() > this.aiDecisionTime) {
+                this.aiIntentX = (Math.random() - 0.5) * 2;
+                this.aiIntentZ = (Math.random() - 0.5) * 1;
+                this.aiDecisionTime = Date.now() + 1000 + (Math.random() * 2000);
+            }
+
+            let currentMoveSpeed = 0.012;
+            const timeSinceShot = Date.now() - this.lastShotTime;
+            if (timeSinceShot < 400) {
+                currentMoveSpeed = 0.002;
+                this.vel.multiplyScalar(0.85);
+            }
+
+            this.vel.x += this.aiIntentX * currentMoveSpeed;
+            this.vel.z += this.aiIntentZ * currentMoveSpeed;
+
+            // C. Targeting & Shooting
+            const activeOpponents = opponents.filter(o => o.mesh.visible && o.health > 0);
+            if (activeOpponents.length > 0) {
+                activeOpponents.sort((a, b) => this.mesh.position.distanceTo(a.mesh.position) - this.mesh.position.distanceTo(b.mesh.position));
+                const target = activeOpponents[0];
+                this.mesh.lookAt(target.mesh.position.x, 1, target.mesh.position.z);
+
+                let pathBlocked = false;
+                const dirToTarget = new THREE.Vector3().subVectors(target.mesh.position, this.mesh.position).normalize();
+                const distToTarget = this.mesh.position.distanceTo(target.mesh.position);
+
+                entities.forEach(other => {
+                    if (other !== this && other.team === this.team && other.mesh.visible) {
+                        const dirToTeammate = new THREE.Vector3().subVectors(other.mesh.position, this.mesh.position);
+                        const distToTeammate = dirToTeammate.length();
+                        if (distToTeammate < distToTarget) {
+                            const dot = dirToTeammate.normalize().dot(dirToTarget);
+                            if (dot > 0.96) { 
+                                pathBlocked = true;
+                                let strafeDir = new THREE.Vector3(dirToTarget.z, 0, -dirToTarget.x);
+                                if (Math.abs(this.mesh.position.x + strafeDir.x * 2) > SETTINGS.WALL_X) strafeDir.multiplyScalar(-1);
+                                this.vel.add(strafeDir.normalize().multiplyScalar(0.08)); 
+                            }
+                        }
+                        if (distToTeammate < 3.5) {
+                            const repulsion = new THREE.Vector3().subVectors(this.mesh.position, other.mesh.position);
+                            repulsion.y = 0;
+                            this.vel.add(repulsion.normalize().multiplyScalar(0.03));
+                        }
+                    }
+                });
+
+                if (!pathBlocked && !this.isExhausted) {
+                    const minStaminaRequired = (distToTarget < 15) ? 10 : 40;
+                    if (this.stamina > minStaminaRequired) this.attack(target);
+                }
+            }
+        }
+
+        // --- 6. HUMAN-LIKE ANIMATION ---
+        const speed = Math.sqrt(this.vel.x ** 2 + this.vel.z ** 2);
+        if (speed > 0.01 && this.mesh.visible) {
+            const time = Date.now() * 0.008; 
+            const swing = Math.sin(time) * 0.7;
+            if (this.leftLeg) this.leftLeg.rotation.x = swing;
+            if (this.rightLeg) this.rightLeg.rotation.x = -swing;
+            if (this.leftArm) this.leftArm.rotation.x = -swing;
+            if (this.rightArm) this.rightArm.rotation.x = swing;
+            if (this.torso) this.torso.rotation.x = 0.15;
+        } else if (this.mesh.visible) {
+            const lerp = 0.1;
+            if (this.leftLeg) this.leftLeg.rotation.x *= (1 - lerp);
+            if (this.rightLeg) this.rightLeg.rotation.x *= (1 - lerp);
+            if (this.leftArm) this.leftArm.rotation.x *= (1 - lerp);
+            if (this.rightArm) this.rightArm.rotation.x *= (1 - lerp);
+            if (this.torso) this.torso.rotation.x *= (1 - lerp);
+        }
+
+        // --- 7. FINAL BOUNDARY LOCK (Revised & Fixed) ---
+        const currentZone = SETTINGS.ZONES[this.currentZoneIndex];
+        const zoneStart = this.currentZoneIndex === 0 ? 0 : SETTINGS.ZONES[this.currentZoneIndex - 1].z;
+        const zoneEnd = currentZone.z;
+        const teamName = this.team.toUpperCase();
+
+        if (teamName === "BLUE") {
+            // Blue is POSITIVE. Must stay between (zoneStart) and (zoneEnd)
+            if (this.mesh.position.z < zoneStart) {
+                this.mesh.position.z = zoneStart;
+                if (this.vel.z < 0) this.vel.z = 0; 
+            }
+            if (this.mesh.position.z > zoneEnd) { 
+                this.mesh.position.z = zoneEnd; 
+                if (this.vel.z > 0) this.vel.z = 0; 
+            }
+        } else if (teamName === "ORANGE") {
+            // Orange is NEGATIVE. Must stay between (-zoneStart) and (-zoneEnd)
+            if (this.mesh.position.z > -zoneStart) { 
+                this.mesh.position.z = -zoneStart; 
+                if (this.vel.z > 0) this.vel.z = 0; 
+            }
+            if (this.mesh.position.z < -zoneEnd) { 
+                this.mesh.position.z = -zoneEnd; 
+                if (this.vel.z < 0) this.vel.z = 0; 
+            }
+        }
+
+        // --- 8. SIDE WALLS (Moved inside the function) ---
+        const xLimit = SETTINGS.ARENA_WIDTH / 2 - 1.2;
+        if (Math.abs(this.mesh.position.x) > xLimit) {
+            this.mesh.position.x = Math.sign(this.mesh.position.x) * xLimit;
+            this.vel.x = 0;
+        }
+    } // This ONE brace closes the update(opponents) function
+
+    takeDamage(amount, knockback) {
+        this.health -= amount;
+        this.vel.add(knockback);
+        if (this.health <= 0) {
+            this.pushToNextZone();
+        }
+    }
+
+    pushToNextZone() {
+        this.currentZoneIndex++;
+        this.health = 25;
+        const side = this.team === "BLUE" ? 1 : -1;
+
+        if (this.currentZoneIndex > 2) {
+            this.knockout();
+        } else {
+            const nextZBoundary = side * SETTINGS.ZONES[this.currentZoneIndex - 1].z;
+            const safeZ = nextZBoundary + (side * 1.5);
+            // Spreads them across 80% of the arena width
+            let newX = (Math.random() - 0.5) * (SETTINGS.ARENA_WIDTH * 0.8);
+
+            spawnVFX(this.mesh.position, 0xffffff, 40, 0.8);
+            this.mesh.position.set(newX, 8, safeZ);
+            this.vel.set(0, 0, 0);
+            spawnVFX(new THREE.Vector3(newX, 8, safeZ), 0x00ffff, 20, 0.3);
+        }
+    }
+
+    knockout() {
+    spawnVFX(this.mesh.position, 0xffffff, 100, 2);
+    this.mesh.visible = false;
+    this.mesh.position.set(0, -10, 0);
+
+    // NEW: TRIGGER SPECTATOR MODE
+    if (this.isPlayer) {
+        isSpectator = true;   // Detach camera
+        isFollowMode = false;  // Exit Over-the-Shoulder
+		
+	// Force hide the UI immediately
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.opacity = '0';
+    }
+}
+
+    attack(aiTarget = null) {
+    if (!gameActive) return;
+    if (this.isExhausted) return;
+
+    // 1. Update the Input Timer (This freezes recovery)
+    if (this.isPlayer && isMouseDown) {
+        this.lastInputTime = Date.now();
+    }
+
+    const config = ELEMENTS[this.currentElement];
+    const isBot = !this.isPlayer;
+    const effectiveCooldown = isBot ? config.cooldown * 1.0 : config.cooldown;
+    const effectiveSpeed = isBot ? config.speed * 1.2 : config.speed; // Ensure speed is defined
+    
+    // 2. Check Cooldown
+    const now = Date.now();
+    if (now - this.lastShotTime < effectiveCooldown) return;
+
+    // --- NEW STAMINA LOGIC (Subtracting) ---
+    this.lastShotTime = now;
+    this.lastInputTime = now; 
+    
+    this.stamina = (this.stamina || 100) - config.drain;
+
+    // Trigger Exhaustion at 0
+    if (this.stamina <= 0) {
+        this.stamina = 0;
+        this.isExhausted = true;
+    } 
+
+    // --- PROJECTILE SPAWNING ---
+    const spawnPos = this.mesh.position.clone();
+    spawnPos.y += 0.5;
+
+    const pColor = config.projectileColor || config.color;
+    let glowColor = pColor;
+    let glowIntensity = 0.5;
+
+    if (this.currentElement === 'fire') {
+        glowColor = 0xffff00; 
+        glowIntensity = 2.0;
+    }
+
+    const pMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(config.size),
+        new THREE.MeshStandardMaterial({ 
+            color: pColor, 
+            emissive: pColor, 
+            emissiveIntensity: 0.5 
+        })
+    );
+    pMesh.position.copy(spawnPos);
+
+    let dir = new THREE.Vector3();
+    if (this.isPlayer) {
+        dir.x = 0;
+        dir.y = 0;
+        dir.z = (this.team === 'BLUE') ? -1 : 1;
+    } else if (aiTarget) {
+        dir.subVectors(aiTarget.mesh.position, this.mesh.position);
+        dir.y = 0;
+    } else {
+        return; // Now safely inside the function
+    }
+
+    dir.normalize();
+
+    const flashPos = spawnPos.clone().add(dir.clone().multiplyScalar(0.7));
+    spawnMuzzleFlash(flashPos, glowColor, 12);
+
+    projectiles.push({
+        mesh: pMesh,
+        vel: dir.multiplyScalar(effectiveSpeed),
+        owner: this,
+        config: config
+    });
+
+    scene.add(pMesh);
+}
+}
+
+
+
+    // --- HELPER: SHUFFLE ARRAY ---
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+// --- TEAM SETUP (DYNAMICALLY SCALED) ---
+const elementTypes = ['FIRE', 'WATER', 'EARTH'];
+
+// Spread fighters across the new width (approx 35% of total width each way)
+const sidePos = SETTINGS.ARENA_WIDTH * 0.35; 
+const xPositions = [-sidePos, 0, sidePos]; 
+
+// Use the Outer Zone boundary to place them at the very back
+const startDepth = SETTINGS.ZONES[0].z - 2; // 2 units in from the back wall
+
+// 1. Create Blue Team (Positive Z)
+const blueElements = shuffle([...elementTypes]);
+const blueX = shuffle([...xPositions]);
+
+for (let i = 0; i < 3; i++) {
+    const isPlayer = (i === 0); 
+    const el = blueElements[i];
+    // Start at +startDepth
+    const fighter = new Fighter(isPlayer, startDepth, ELEMENTS[el].color, el);
+    fighter.mesh.position.x = blueX[i];
+    blueTeam.push(fighter);
+}
+
+// 2. Create Orange Team (Negative Z)
+const redElements = shuffle([...elementTypes]);
+const redX = shuffle([...xPositions]);
+
+for (let i = 0; i < 3; i++) {
+    const el = redElements[i];
+    // Start at -startDepth
+    const fighter = new Fighter(false, -startDepth, ELEMENTS[el].color, el);
+    fighter.mesh.position.x = redX[i];
+    orangeTeam.push(fighter);
+}
+
+
+
+
+// --- INPUTS and key listeners ---
+const keys = {};
+
+window.onkeydown = (e) => {
+    keys[e.key.toLowerCase()] = true;
+
+    // --- CAMERA TOGGLE ---
+    if (e.key.toLowerCase() === 'c') {
+        isFollowMode = !isFollowMode;
+        console.log("Camera Mode:", isFollowMode ? "FOLLOW" : "BROADCAST");
+    }
+   /*if (['1','2','3'].includes(e.key)) {
+        player.currentElement = e.key === '1' ? 'EARTH' : e.key === '2' ? 'WATER' : 'FIRE';
+		// --- THE COLOR FIX ---
+        const config = ELEMENTS[player.currentElement];
+        // This converts 0x8B4513 into "#8b4513" for CSS
+        const cssColor = '#' + new THREE.Color(config.color).getHexString();
+        document.getElementById('crosshair').style.borderColor = cssColor;
+        // ---------------------
+        document.querySelectorAll('.el-icon').forEach(el => el.classList.remove('active'));
+        document.getElementById('el-' + e.key).classList.add('active'); */
+    }
+
+window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+window.onmousedown = () => isMouseDown = true;
+window.onmouseup = () => isMouseDown = false;
+
+window.addEventListener('wheel', (event) => {
+    // Scrolling up (negative deltaY) zooms IN
+    // Scrolling down (positive deltaY) zooms OUT
+    zoomLevel += event.deltaY * 0.001;
+    
+    // Clamp the value so it stays between 0 and 1
+    zoomLevel = Math.max(0, Math.min(1, zoomLevel));
+}, { passive: true });
+
+
+
+
+// Set initial crosshair color on page load
+document.getElementById('crosshair').style.borderColor = '#' + new THREE.Color(ELEMENTS[player.currentElement].color).getHexString();
+
+
+
+
+function startCountdown() {
+    const display = document.getElementById('countdown');
+    let count = 3;
+    
+    const timer = setInterval(() => {
+        display.innerText = count > 0 ? count : "BEGIN!";
+        
+        if (count < 0) {
+            clearInterval(timer);
+            display.innerText = "";
+            
+            const playerObj = entities.find(e => e.isPlayer);
+            if (playerObj) playerObj.vel.set(0, 0, 0);
+            
+            gameActive = true; 
+            console.log("Countdown finished - Bots released!");
+        } // <--- 1. Closes "if (count < 0)"
+        
+        count--;
+    }, 1000); // <--- 2. Closes "setInterval(() => {"
+}
+
+
+
+
+// --- LOOP ---
+function animate() {
+    requestAnimationFrame(animate);
+	
+	// --- 1. SPECTATOR PANNING ---
+    if (isSpectator) {
+        const panSpeed = 0.5;
+        if (keys['a']) spectatorZOffset += panSpeed;
+        if (keys['d']) spectatorZOffset -= panSpeed;
+        
+        // Keep the camera within a reasonable range of the arena
+        spectatorZOffset = Math.max(-80, Math.min(80, spectatorZOffset));
+    }
+	
+	const targetNear = (Math.abs(camera.position.z) > 22) ? 8.0 : 0.1;
+
+    // Only update if the value is different from the current setting
+    if (camera.near !== targetNear) {
+    camera.near = targetNear;
+    camera.updateProjectionMatrix();
+}
+
+    // --- DYNAMIC BANNER HIDER ---
+    const arenaLimit = SETTINGS.ARENA_LENGTH / 2; // The edge of the glass walls
+
+    scene.children.forEach(child => {
+    if (child.isBannerPart) {
+        // 1. Identify if this is a Blue side banner (positive Z) or Orange (negative Z)
+        const isBlueSide = child.position.z > 0;
+        const camZ = camera.position.z;
+
+        // 2. THE RULE: If the camera moves past the arena walls into the "Outer Zone",
+        // we hide the banners on the side the camera is currently on.
+        if (isBlueSide && camZ > arenaLimit) {
+            child.visible = false; // Hide Blue banners if camera is in Blue Outer Zone
+        } else if (!isBlueSide && camZ < -arenaLimit) {
+            child.visible = false; // Hide Orange banners if camera is in Orange Outer Zone
+        } else {
+            child.visible = true;  // Show them if the camera is in the middle/opposite side
+        }
+    }
+});
+	
+    // --- 2. CAMERA SYSTEM ---
+if (window.player) {
+    let targetCameraPos = new THREE.Vector3();
+    let lookAtTarget = new THREE.Vector3();
+    const zL = (typeof zoomLevel !== 'undefined') ? zoomLevel : 0.5;
+
+    // 3. SPECTATOR MODE (window.player is Knocked Out)
+    if (isSpectator) {
+        targetCameraPos.set(
+            40 + (20 * zL),      // X (Distance from arena)
+            20 + (10 * zL),      // Y (Height)
+            spectatorZOffset     // Z (Pan Left/Right)
+        ); 
+        
+        lookAtTarget.set(0, 0, spectatorZOffset); 
+        
+        // Hide UI
+        if (document.getElementById('crosshair')) {
+            document.getElementById('crosshair').style.opacity = '0';
+            document.getElementById('crosshair').style.pointerEvents = 'none';
+        }
+
+    // 4. OVER-THE-SHOULDER MODE (Active Gameplay)
+    } else if (isFollowMode) {
+        const speed = Math.sqrt(window.player.vel.x ** 2 + window.player.vel.z ** 2);
+        const dynamicZoom = Math.min(speed * 12, 4); 
+        
+        targetCameraPos.set(
+            window.player.mesh.position.x, 
+            4 + (dynamicZoom * 0.2) + (5 * zL), 
+            window.player.mesh.position.z + 8 + dynamicZoom + (10 * zL)
+        );
+        
+        lookAtTarget.set(window.player.mesh.position.x, 2, window.player.mesh.position.z - 10);
+        
+        // Show UI
+        if (document.getElementById('crosshair')) {
+            document.getElementById('crosshair').style.opacity = '1';
+            document.getElementById('crosshair').style.pointerEvents = 'auto';
+        }
+
+    // 5. STANDARD BROADCAST (Manual Toggle)
+    } else {
+        targetCameraPos.set(0, 30, 50); 
+        lookAtTarget.set(0, 0, 0);
+
+        // Hide UI
+        if (document.getElementById('crosshair')) {
+            document.getElementById('crosshair').style.opacity = '0';
+        }
+    }
+
+    // Apply the position and rotation
+    camera.position.lerp(targetCameraPos, 0.05);
+    camera.lookAt(lookAtTarget);
+    
+    if (gameActive) {
+	
+	        //  13. window.player Controls
+        if (typeof window.player !== 'undefined' && window.player && !isSpectator) {
+        if (keys['w']) window.player.vel.z -= 0.04;
+        if (keys['s']) window.player.vel.z += 0.04;
+        if (keys['a']) window.player.vel.x -= 0.04;
+        if (keys['d']) window.player.vel.x += 0.04;
+        if (keys[' '] && window.player.mesh.position.y <= 1.01) window.player.vel.y = 0.22;
+        if (isMouseDown) window.player.attack();
+    }
+	
+        // --- 6. GLOBAL WIND ---
+    const time = Date.now() * 0.001;
+    const gustStrength = Math.max(0, Math.sin(time * 0.4) * Math.sin(time * 0.1));
+
+    // --- 7. DUST SYSTEM ---
+if (typeof SETTINGS !== 'undefined' && dustParticles) {
+    // A. Define the direction (1 = toward Blue, -1 = toward Orange)
+    // Match this to whatever logic you use for your banners!
+    const windDir = windDirectionZ;
+	const arenaEdge = (SETTINGS.ARENA_LENGTH / 2) + 5; 
+
+    if (gustStrength > 0.2 && dustParticles.length < 40) {
+        const dustGeo = new THREE.PlaneGeometry(0.5, 0.5);
+        const dustMat = new THREE.MeshBasicMaterial({ 
+            color: 0x887766, 
+            transparent: true, 
+            opacity: 0.15, 
+            depthWrite: false, 
+            side: THREE.DoubleSide 
+        });
+        const dustMesh = new THREE.Mesh(dustGeo, dustMat);
+        
+        dustMesh.scale.set(1, 4 + Math.random() * 5, 1);
+        
+        // B. Start position logic: If wind is reversed, start at +50 instead of -50
+        const startZ = windDir > 0 ? -arenaEdge : arenaEdge;
+
+        dustMesh.position.set((Math.random() - 0.5) * SETTINGS.ARENA_WIDTH, 0.1, startZ);
+
+        // C. Velocity: Multiply Z velocity by windDir
+        dustParticles.push({ 
+            mesh: dustMesh, 
+            vel: new THREE.Vector3(
+                (Math.random() - 0.5) * 0.1, 
+                0, 
+                (0.6 + Math.random() * 0.4) * windDir // Moves in wind direction
+            ), 
+            life: 1.0 
+        });
+    }
+
+    for (let i = dustParticles.length - 1; i >= 0; i--) {
+        const d = dustParticles[i];
+        
+        // D.Speed up during gusts
+        d.mesh.position.z += d.vel.z * (1.0 + gustStrength * 2);
+        d.mesh.position.x += d.vel.x;
+        
+        d.life -= 0.006;
+        d.mesh.material.opacity = d.life * 0.2;
+
+        // E. Cleanup logic: Remove if life ends OR it passes the opposite boundary
+        const isOutOfBounds = windDir > 0 ? d.mesh.position.z > arenaEdge : d.mesh.position.z < -arenaEdge;
+
+        if (d.life <= 0 || isOutOfBounds) { 
+        scene.remove(d.mesh); 
+        dustParticles.splice(i, 1); 
+        }
+    }
+}
+
+    // 8. TORCHES 
+    torches.forEach(t => {
+        t.light.intensity = t.baseIntensity + (Math.random() - 0.5) * 5;
+        const s = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+        t.flame.scale.set(s, s, s);
+    });
+
+    // 9. BANNERS (Synced & Symmetrical + Corrected Safety) 
+if (bannerPivots.length > 0) {
+    bannerPivots.forEach((pivot, index) => {
+        // 1. Identify the side
+        const isOrangeSide = pivot.parent.rotation.y > 1; 
+
+        // 2. Translate Global Wind into Local Push
+        // If windDir is 1 (Toward Blue), Blue side pushes Forward (+), 
+        // Orange side pushes Backward (-) to move in the same global Z direction.
+        const localWindFactor = isOrangeSide ? -windDirectionZ : windDirectionZ;
+
+        const syncIndex = index % 3; 
+        const flutter = Math.sin(time * 20 + syncIndex) * 0.05 * gustStrength;
+        const idleSway = Math.sin(time + syncIndex * 1.5) * 0.1;
+
+        // 3. Apply the Physics
+        const baseLift = 0.2; // Minimum lean to prevent z-fighting with the pole
+        const totalWindPush = localWindFactor * (0.7 * gustStrength);
+        
+        // Target rotation relative to the pole
+        let targetRotation = baseLift + (localWindFactor * idleSway) + totalWindPush;
+        
+        // --- THE SAFETY CLAMP ---
+        // 0.05 is the 'Rest' angle (leaning slightly away from pole).
+        // 1.3 is the 'Max Lift' (flying nearly horizontal).
+        pivot.rotation.x = Math.max(0.05, Math.min(1.3, targetRotation));
+
+        // 4. Side-to-Side Sway (Syncs with the global push)
+        pivot.rotation.z = (Math.cos(time + syncIndex) * 0.05 + flutter) * localWindFactor;
+    });
+}
+
+    // --- 10. STAMINA RECOVERY SYSTEM (Refilling to 100) ---
+    const now = Date.now();
+    entities.forEach(f => {
+        const config = ELEMENTS[f.currentElement];
+        const timeSinceInput = now - f.lastInputTime;
+
+        // Delay before recovery starts: 0.5s normally
+        const waitTime = 500; 
+
+        if (timeSinceInput > waitTime) {
+            // Refill up to 100 instead of draining to 0
+            if (f.stamina < 100) {
+                f.stamina += config.recovery; 
+            }
+            
+            // Limit at 100 and clear exhaustion
+            if (f.stamina >= 100) {
+                f.stamina = 100;
+                f.isExhausted = false;
+            }
+        }
+
+        // --- OPTIONAL: PARTIAL RECOVERY ---
+        // If you want them to be able to shoot before it hits 100, 
+        // you can clear exhaustion at 30% instead:
+        // if (f.isExhausted && f.stamina >= 30) f.isExhausted = false;
+    });
+
+    // --- 11. DYNAMIC UI UPDATE (Fixed) ---
+const stamBar = document.getElementById('player-stamina'); // Remove 'window.'
+const healthBar = document.getElementById('player-health'); // Remove 'window.'
+
+// --- Stamina Logic ---
+if (stamBar && window.player) {
+    stamBar.style.width = window.player.stamina + "%";
+    
+    if (window.player.isExhausted) {
+        const pulse = 0.7 + Math.sin(Date.now() * 0.01) * 0.3;
+        stamBar.style.backgroundColor = `rgba(180, 0, 0, ${pulse})`;
+        stamBar.style.boxShadow = "0 0 10px rgba(255, 0, 0, 0.8)";
+    } else {
+        const config = ELEMENTS[window.player.currentElement];
+        const hexColor = "#" + config.color.toString(16).padStart(6, '0');
+        stamBar.style.backgroundColor = hexColor;
+        stamBar.style.boxShadow = "none";
+    }
+}
+
+// --- Health Logic ---
+if (healthBar && window.player) {
+    // 1. Update the width based on health
+    const healthPercent = (window.player.health / 25) * 100;
+    healthBar.style.width = healthPercent + "%";
+
+    // 2. Change color if health is low (Keep this INSIDE the if-block!)
+    healthBar.style.backgroundColor = window.player.health < 8 ? "#e74c3c" : "#2ecc71";
+}
+}
+
+        // 14. Particle VFX (MOVE AND FADE PARTICLES)
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            
+            // Move the particle
+            p.mesh.position.add(p.vel);
+            
+            // Use decay if it exists (for muzzle flash), otherwise use 0.02
+            const fade = p.decay ? p.decay : 0.02;
+            p.life -= fade;
+            
+            // Apply visuals
+            p.mesh.material.opacity = p.life;
+            p.mesh.scale.setScalar(Math.max(0.001, p.life));
+            
+            // Remove if dead
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+            }
+        }
+
+        // 15. PROJECTILE & HIT LOGIC (RESTORED)
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p1 = projectiles[i];
+            if (!p1) continue;
+            p1.mesh.position.add(p1.vel);
+
+            // A. Projectile vs Projectile interactions
+            for (let j = i - 1; j >= 0; j--) {
+                const p2 = projectiles[j];
+                if (!p2) continue;
+                if (p1.owner.team !== p2.owner.team && p1.mesh.position.distanceTo(p2.mesh.position) < (p1.config.size + p2.config.size + 0.3)) {
+                    let effectColor = 0xffffff;
+                    const type1 = p1.owner.currentElement;
+                    const type2 = p2.owner.currentElement;
+                    const interactions = [
+                        { win: 'FIRE', lose: 'EARTH', color: 0x444444 },
+                        { win: 'EARTH', lose: 'WATER', color: 0x4b3621 },
+                        { win: 'WATER', lose: 'FIRE', color: 0xeeeeee }
+                    ];
+                    for (let interaction of interactions) {
+                        if ((type1 === interaction.win && type2 === interaction.lose) || (type2 === interaction.win && type1 === interaction.lose)) {
+                            effectColor = interaction.color;
+                            break;
+                        }
+                    }
+                    spawnVFX(p1.mesh.position, effectColor, 25, 0.6);
+                    scene.remove(p1.mesh);
+                    scene.remove(p2.mesh);
+                    projectiles.splice(i, 1);
+                    projectiles.splice(j, 1);
+                    i--; break;
+                }
+            }
+
+            if (!projectiles[i]) continue;
+
+            //B. Projectile vs Fighter Hit Detection
+            for (let target of entities) {
+                if (target === p1.owner || !target.mesh.visible) continue;
+                const dist = p1.mesh.position.distanceTo(target.mesh.position);
+                if (dist < 1.2) {
+                    if (target.team === p1.owner.team) {
+                        scene.remove(p1.mesh);
+                        projectiles.splice(i, 1);
+                        spawnVFX(p1.mesh.position, 0xffffff, 5, 0.2); 
+                    } else {
+                        const kbVector = p1.vel.clone().multiplyScalar(p1.config.kb).divideScalar(2);
+                        target.takeDamage(p1.config.dmg, kbVector);
+						const impactColor = p1.config.projectileColor || p1.config.color;
+                        let vfxColor = p1.config.color;
+                        if (p1.owner.currentElement === 'fire') vfxColor = 0xffff00; // Explode in yellow!
+                        spawnVFX(p1.mesh.position, vfxColor, 12, 0.4);
+                        scene.remove(p1.mesh);
+                        projectiles.splice(i, 1);
+                    }
+                    break;
+                }
+            }
+
+            //C. Clean up out of bounds
+            if (projectiles[i] && p1.mesh.position.length() > 120) {
+                scene.remove(p1.mesh);
+                projectiles.splice(i, 1);
+            }
+        }
+
+        // --- D. Victory/Defeat Checks ---
+		// Make sure these variable names match your BLUE and ORANGE arrays
+	const blueAlive = blueTeam.filter(f => f.mesh.visible).length;
+	const orangeAlive = orangeTeam.filter(f => f.mesh.visible).length; // Changed from orangeTeam
+
+	if (orangeAlive === 0 || blueAlive === 0) {
+		gameActive = false; 
+		setTimeout(() => {
+        // A little extra drama for the desert arena
+        if (orangeAlive === 0) {
+            alert("VICTORY! The desert is yours.");
+        } else {
+            alert("DEFEAT! You have fallen in the dunes.");
+        }
+        window.location.reload();
+    }, 500);
+}
+}
+
+    // --- 12. CLEAN TEAM UPDATES ---
+if (gameActive) {
+    entities.forEach(f => {
+        // Only update if they haven't been knocked out
+        if (f.mesh.visible) {
+            // Logic: If I am Blue, my opponents are the Orange Team.
+            // If I am Orange, my opponents are the Blue Team.
+            const opponents = (f.team === "BLUE") ? orangeTeam : blueTeam;
+            f.update(opponents);
+        }
+    });
+}
+
+renderer.render(scene, camera);
+}
+
+animate();
+
+
+
+
+window.onresize = () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+};
+    </script>
+</body>
+</html>
